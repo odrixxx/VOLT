@@ -22,6 +22,7 @@ handlers.py — «мозг» бота. Здесь лежит вся логика
 """
 
 import asyncio                              # чтобы запустить тяжёлую OCR-проверку «в фоне», не вешая бота
+import glob                                 # поиск картинок с любым расширением (welcome.*, photo_1.jpg и т.п.)
 import logging                              # писать в терминал, что происходит при проверке чека
 import os                                   # чтобы собрать путь к файлу картинки
 
@@ -45,23 +46,56 @@ log = logging.getLogger("volt.bot")
 router = Router()
 
 # ---------------- КАРТИНКА К ПРИВЕТСТВИЮ ----------------
-# Положи любую свою картинку (постер акции) в файл welcome.png рядом с bot.py
-# (в ту же папку, где лежит handlers.py). Форматы, которые принимает Telegram: jpg, jpeg, png.
-# Папка assets больше не нужна — картинка лежит прямо в корне проекта.
-WELCOME_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "welcome.png")
+# Положи свою картинку (постер акции / своё фото — неважно что) в корень проекта,
+# рядом с bot.py. Бот сам найдёт её по любому из типичных имён и в любом формате,
+# так что переименовывать файл НЕ нужно.
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 
-# Поддерживаемые расширения: ищем welcome.png, но если пользователь положил jpg/jpeg — тоже сработает
-WELCOME_IMAGE_CANDIDATES = [
-    os.path.join(os.path.dirname(__file__), ext)
-    for ext in ("welcome.png", "welcome.jpg", "welcome.jpeg")
-]
+# Шаблоны имён файлов-кандидатов, которые бот считает «картинкой приветствия».
+WELCOME_NAME_PATTERNS = (
+    "welcome.*", "Welcome.*", "WELCOME.*",
+    "poster.*", "Poster.*", "posters.*", "акция.*", "volt.*",
+    "photo.*", "photo_*", "img.*", "image.*", "IMG_*", "IMG-*",
+    "DSC_*", "DSCF*", "PXL_*", "Screenshot*", "screenshot*",
+    "mmexport*", "1000*", "IMG[0-9]*",
+)
+
+# Форматы, которые принимает Telegram как фото
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".gif"}
 
 
 def find_welcome_image() -> str | None:
-    """Возвращает путь к существующему файлу картинки приветствия или None."""
-    for path in WELCOME_IMAGE_CANDIDATES:
-        if os.path.exists(path):
-            return path
+    """Ищет картинку приветствия в корне проекта. Возвращает путь или None.
+
+    Порядок поиска:
+      1. Точное имя welcome.png / welcome.jpg / welcome.jpeg — всегда приоритет;
+      2. Любой файл с «типичным» именем (фото_1.jpg, IMG_2024.PNG, Screenshot...);
+      3. Если в корне лежит РОВНО одна картинка — считаем, что это она и есть
+         (загрузил свою фотку без переименования — и она сразу работает).
+    """
+    # 1. Точные имена
+    for ext in (".png", ".jpg", ".jpeg"):
+        exact = os.path.join(PROJECT_ROOT, f"welcome{ext}")
+        if os.path.isfile(exact):
+            return exact
+
+    # 2. Кандидаты по шаблонам имён
+    candidates: list[str] = []
+    for pattern in WELCOME_NAME_PATTERNS:
+        for path in glob.glob(os.path.join(PROJECT_ROOT, pattern)):
+            if os.path.isfile(path) and os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS:
+                candidates.append(path)
+    if candidates:
+        # берём самый свежий по дате изменения — обычно именно его только что загрузили
+        return max(candidates, key=os.path.getmtime)
+
+    # 3. Любая единственная картинка в корне проекта
+    all_images = [
+        p for p in glob.glob(os.path.join(PROJECT_ROOT, "*"))
+        if os.path.isfile(p) and os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS
+    ]
+    if len(all_images) == 1:
+        return all_images[0]
     return None
 
 
