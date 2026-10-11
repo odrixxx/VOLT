@@ -155,26 +155,46 @@ async def main() -> None:
     check("instruction text", "КАК ПОЛУЧИТЬ РОБУКСЫ" in instr and "Один чек = одна выплата" in instr)
     check("instruction id remembered", 111 in h.pending_instruction_msg)
 
-    # 2b. В инструкции есть кнопка «ПОПОЛНИТЬ ЧЕРЕЗ БОТА»
+    # 2b. В инструкции осталась одна кнопка «ПОГНАЛИ 🔥» (callback), кнопок
+    #     «Назад» и «Пополнить через бота» больше нет — их убрали по просьбе.
     kb_rows = h.instruction_keyboard().inline_keyboard
     all_btns = [b for row in kb_rows for b in row]
-    check("topup button present",
-          any(b.callback_data == h.CALLBACK_TOPUP_BOT for b in all_btns))
+    check("instruction single button", len(all_btns) == 1)
+    check("instruction button is callback",
+          all_btns[0].callback_data == h.CALLBACK_UPLOAD_CHECK and all_btns[0].url is None)
+    check("no topup/back buttons",
+          not any(b.callback_data in (h.CALLBACK_TOPUP_BOT, "back") for b in all_btns))
 
-    # 2c. Нажатие «ПОПОЛНИТЬ ЧЕРЕЗ БОТА» -> новое сообщение с текстом, ссылкой и кнопкой снизу
-    cb_top = MagicMock()
-    cb_top.from_user.id = 111
-    cb_top.message = make_message(111)
-    cb_top.answer = noop
-    await h.cb_topup_bot(cb_top)
-    topup_entries = [s for s in sent if s[0] == "answer"][-1:]
-    t_text, t_has_kb, t_parse = topup_entries[0][1], topup_entries[0][2], topup_entries[0][3]
-    check("topup text", "ЗАКИДЫВАЕМ РОБУКСЫ ПРЯМО В АКК" in t_text and "Жми и заряжай баланс" in t_text)
-    check("topup privacy link", f'<a href="{h.PRIVACY_URL}">Конфиденциальность и безопасность</a>' in t_text)
-    check("topup html parse mode", t_parse == "HTML")
-    check("topup has bottom button", t_has_kb is True)
-    top_kb = h.topup_keyboard().inline_keyboard
-    check("topup button is url", len(top_kb) == 1 and top_kb[0][0].url == h.PRIVACY_URL)
+    # 2c. Повторное нажатие «ПОГНАЛИ 🔥», когда инструкция уже на экране:
+    #     бот не плодит новых сообщений, а отвечает всплывающим уведомлением.
+    sent.clear()
+    cb_again = MagicMock()
+    cb_again.from_user.id = 111                 # этот юзер уже видел инструкцию
+    cb_again.message = make_message(111)
+    alerts: list[tuple] = []
+
+    async def alert(*a, **k):
+        alerts.append((a, k))
+    cb_again.answer = alert
+    await h.cb_upload_check(cb_again)
+    check("repeat tap no new message", not any(s[0] == "answer" for s in sent))
+    check("repeat tap shows alert",
+          any(kw.get("show_alert") and "фото чека" in args[0]
+              for args, kw in alerts))
+
+    # 2d. Новое нажатие от того, кто инструкцию ещё не видел -> показывает инструкцию
+    sent.clear()
+    cb_new = MagicMock()
+    cb_new.from_user.id = 777
+    cb_new.message = make_message(777)
+
+    async def noop2(*a, **k):
+        return None
+    cb_new.answer = noop2
+    await h.cb_upload_check(cb_new)
+    check("first tap sends instruction",
+          any(s[0] == "answer" and s[1] and "КАК ПОЛУЧИТЬ РОБУКСЫ" in s[1] for s in sent))
+    check("first tap remembers msg", 777 in h.pending_instruction_msg)
 
     # 3. Пользователь шлёт фото: инструкция удаляется, есть «Проверка чека», есть вердикт
     sent.clear()

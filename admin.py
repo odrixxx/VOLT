@@ -30,8 +30,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from aiogram import F, Router
-from aiogram.filters import Command, CommandObject
-from aiogram.types import Message
+from aiogram.filters import BaseFilter, Command, CommandObject
+from aiogram.types import Message, TelegramObject
 
 if TYPE_CHECKING:                      # импорт только для подсказок типизации, в рантайме не нужен
     from aiogram import Bot
@@ -72,10 +72,19 @@ def is_admin(user_id: int | None) -> bool:
     return user_id is not None and user_id in ADMIN_IDS
 
 
-def admin_only() -> F:
-    """Фильтр «это админ». Вызывается в момент регистрации хэндлеров (после
-    init_admins), поэтому видит актуальный список ADMIN_IDS."""
-    return F.from_user.id.in_(set(ADMIN_IDS))
+class AdminOnly(BaseFilter):
+    """Фильтр «это админ». Проверяет ADMIN_IDS В МОМЕНТ прихода сообщения,
+    а не в момент регистрации хэндлеров — так панель работает даже если
+    ADMIN_IDS стал известен позже (или поменялся через reload_dot_env)."""
+
+    async def __call__(self, obj: TelegramObject) -> bool:
+        user = getattr(obj, "from_user", None)
+        return is_admin(getattr(user, "id", None))
+
+
+def admin_only() -> AdminOnly:
+    """Возвращает экземпляр фильтра-проверки админа (см. AdminOnly выше)."""
+    return AdminOnly()
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +224,7 @@ async def mirror_to_admins(message: Message) -> None:
 # КОМАНДЫ АДМИНА
 # ---------------------------------------------------------------------------
 
-@admin_router.message(admin_only(), Command("help"))
+@admin_router.message(Command("help"), admin_only())
 async def admin_help(message: Message) -> None:
     """Шпаргалка по админ-командам (только для админов)."""
     await message.answer(
@@ -231,7 +240,7 @@ async def admin_help(message: Message) -> None:
     )
 
 
-@admin_router.message(admin_only(), Command("users"))
+@admin_router.message(Command("users"), admin_only())
 async def admin_users(message: Message) -> None:
     """Показывает всех известных пользователей: ID, имя, @ник, число сообщений."""
     if not USERS:
@@ -243,7 +252,7 @@ async def admin_users(message: Message) -> None:
     await message.answer("📒 ПОЛЬЗОВАТЕЛИ:\n\n" + "\n\n".join(lines))
 
 
-@admin_router.message(admin_only(), Command("last"))
+@admin_router.message(Command("last"), admin_only())
 async def admin_last(message: Message, command: CommandObject) -> None:
     """Быстрая справка по одному человеку: /last 123456789."""
     if not command.args or not command.args.strip().lstrip("-").isdigit():
@@ -263,7 +272,7 @@ async def admin_last(message: Message, command: CommandObject) -> None:
     )
 
 
-@admin_router.message(admin_only(), Command("write"))
+@admin_router.message(Command("write"), admin_only())
 async def admin_write(message: Message, command: CommandObject) -> None:
     """Разовое сообщение пользователю от имени бота: /write <ID> <текст>."""
     if not command.args:
@@ -278,7 +287,7 @@ async def admin_write(message: Message, command: CommandObject) -> None:
     await message.answer("✅ Отправлено." if ok else "❌ Не отправлено (см. причину выше/логи).")
 
 
-@admin_router.message(admin_only(), Command("talk"))
+@admin_router.message(Command("talk"), admin_only())
 async def admin_talk(message: Message, command: CommandObject) -> None:
     """Включает режим диалога: следующие обычные сообщения админа пойдут юзеру."""
     if not command.args or not command.args.strip().lstrip("-").isdigit():
@@ -293,7 +302,7 @@ async def admin_talk(message: Message, command: CommandObject) -> None:
     await message.answer(f"🎙 Режим диалога включён: пишу {uid}.{note}\nДля выхода: /stop")
 
 
-@admin_router.message(admin_only(), Command("stop"))
+@admin_router.message(Command("stop"), admin_only())
 async def admin_stop(message: Message) -> None:
     """Выключает режим диалога."""
     if TALK_MODE.pop(message.from_user.id, None) is not None:
