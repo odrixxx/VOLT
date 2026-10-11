@@ -32,18 +32,34 @@ from aiogram.types import BufferedInputFile, Message  # BufferedInputFile — к
 router = Router()
 
 # ---------------- КАРТИНКА К ПРИВЕТСТВИЮ ----------------
-# Положи любую свою картинку (постер акции) в папку assets рядом с bot.py
-# и назови её welcome.png. Форматы, которые принимает Telegram: jpg, jpeg, png.
-WELCOME_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "assets", "welcome.png")
+# Положи любую свою картинку (постер акции) в файл welcome.png рядом с bot.py
+# (в ту же папку, где лежит handlers.py). Форматы, которые принимает Telegram: jpg, jpeg, png.
+# Папка assets больше не нужна — картинка лежит прямо в корне проекта.
+WELCOME_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "welcome.png")
+
+# Поддерживаемые расширения: ищем welcome.png, но если пользователь положил jpg/jpeg — тоже сработает
+WELCOME_IMAGE_CANDIDATES = [
+    os.path.join(os.path.dirname(__file__), ext)
+    for ext in ("welcome.png", "welcome.jpg", "welcome.jpeg")
+]
+
+
+def find_welcome_image() -> str | None:
+    """Возвращает путь к существующему файлу картинки приветствия или None."""
+    for path in WELCOME_IMAGE_CANDIDATES:
+        if os.path.exists(path):
+            return path
+    return None
 
 
 def load_welcome_photo() -> BufferedInputFile | None:
     """Читает картинку с диска и готовит её к отправке. Возвращает None, если файла нет."""
-    if not os.path.exists(WELCOME_IMAGE_PATH):
+    path = find_welcome_image()
+    if path is None:
         return None                          # картинки нет — не падаем с ошибкой, просто пропустим фото
-    with open(WELCOME_IMAGE_PATH, "rb") as f:  # "rb" = read binary, читаем как бинарные данные
+    with open(path, "rb") as f:  # "rb" = read binary, читаем как бинарные данные
         data = f.read()
-    return BufferedInputFile(data, filename="welcome.png")  # имя файла, которое увидит Telegram
+    return BufferedInputFile(data, filename=os.path.basename(path))  # имя файла, которое увидит Telegram
 
 # Множество ID пользователей, которых УЖЕ поприветствовали.
 # set удобен тем, что проверка «есть ли число в множестве» работает быстро,
@@ -94,7 +110,7 @@ async def try_greet(message: Message) -> None:
 async def send_greeting(message: Message, text: str) -> None:
     """Отправляет приветствие КАРТИНКОЙ с подписью (текстом под ней).
 
-    Если файла assets/welcome.png нет — бот не упадёт, а пришлёт просто текст.
+    Если файла welcome.png нет — бот не упадёт, а пришлёт просто текст.
     Так проект можно запускать даже до того, как ты положишь свою картинку.
     """
     photo = load_welcome_photo()                   # пробуем прочитать картинку с диска
