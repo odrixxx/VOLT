@@ -88,16 +88,19 @@ async def main() -> None:
         bot = Bot(token=BOT_TOKEN)      # «лицо» бота: умеет читать и писать сообщения в Telegram
     dp = Dispatcher()               # диспетчер: получает обновления от Telegram и раздаёт их хэндлерам
 
-    # Подключаем наш роутер из handlers.py.
-    # Теперь все @router.message(...) из того файла начинают работать.
-    dp.include_router(router)
-
     # Секретная админ-панель (admin.py): зеркалит входящие админам и даёт
     # команды /users /write /talk /stop. Пользователи её не видят и о ней не знают.
     # ВАЖНО: init_admins() перечитывает ADMIN_IDS уже после load_dotenv(),
     # а include_router регистрирует хэндлеры — только после этого панель «оживает».
+    # ПОРЯДОК ВАЖЕН: admin_router подключается ПЕРВЫМ, потому что в handlers.py
+    # есть обработчик на F.text, который перехватывает любой текст (включая
+    # админские команды) и не даёт обновлению дойти до админ-панели.
     admins = init_admins()
     dp.include_router(admin_router)
+
+    # Подключаем наш роутер из handlers.py.
+    # Теперь все @router.message(...) из того файла начинают работать.
+    dp.include_router(router)
 
     print("✅ Бот запущен и ждёт сообщений. Нажми Ctrl+C, чтобы остановить.")
     if not admins:
