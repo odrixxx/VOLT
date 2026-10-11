@@ -57,7 +57,12 @@ def make_message(user_id: int):
     m.photo = [p, p, p]
     m.document = None
 
-    async def answer(text=None, reply_markup=None, **kw):
+    # ВАЖНО: у MagicMock все атрибуты «существуют», поэтому aiogram-фильтры
+    # (F.photo / F.document) пропустили бы любое сообщение в оба хэндлера.
+    # Здесь мы ведём себя как настоящий Telegram: документа нет — атрибута нет.
+    del m.document
+
+    async def answer(text=None, reply_markup=None, parse_mode=None, link_preview_options=None, **kw):
         msg = MagicMock()
         msg.message_id = 999
 
@@ -69,7 +74,7 @@ def make_message(user_id: int):
 
         msg.delete = _delete
         msg.edit_text = _edit_text
-        sent.append(("answer", text, bool(reply_markup)))
+        sent.append(("answer", text, bool(reply_markup), parse_mode))
         return msg
 
     async def answer_photo(photo=None, caption=None, reply_markup=None, **kw):
@@ -84,7 +89,7 @@ def make_message(user_id: int):
 
         msg.delete = _delete
         msg.edit_text = _edit_text
-        sent.append(("photo", caption, bool(reply_markup)))
+        sent.append(("photo", caption, bool(reply_markup), None))
         return msg
 
     async def delete():
@@ -130,10 +135,12 @@ async def main() -> None:
         ok = ok and cond
 
     # 1. Приветствие должно быть с кнопкой
+    #    (приветствие — это фото с подписью, поэтому проверяем запись "photo";
+    #     записи "answer" теперь четырёхэлементные: текст, есть ли клавиатура, parse_mode)
     FakeBot.data = draw_receipt(GOOD_LINES)
     await h.try_greet(make_message(111))
     last = sent[-1]
-    check("greeting has button", last[-1] is True)
+    check("greeting has button", last[0] in ("photo", "answer") and last[2] is True)
 
     # 2. Нажатие кнопки -> текст-инструкция про робуксы
     cb = MagicMock()
@@ -147,6 +154,27 @@ async def main() -> None:
     instr = [s[1] for s in sent if s[0] == "answer"][-1]
     check("instruction text", "КАК ПОЛУЧИТЬ РОБУКСЫ" in instr and "Один чек = одна выплата" in instr)
     check("instruction id remembered", 111 in h.pending_instruction_msg)
+
+    # 2b. В инструкции есть кнопка «ПОПОЛНИТЬ ЧЕРЕЗ БОТА»
+    kb_rows = h.instruction_keyboard().inline_keyboard
+    all_btns = [b for row in kb_rows for b in row]
+    check("topup button present",
+          any(b.callback_data == h.CALLBACK_TOPUP_BOT for b in all_btns))
+
+    # 2c. Нажатие «ПОПОЛНИТЬ ЧЕРЕЗ БОТА» -> новое сообщение с текстом, ссылкой и кнопкой снизу
+    cb_top = MagicMock()
+    cb_top.from_user.id = 111
+    cb_top.message = make_message(111)
+    cb_top.answer = noop
+    await h.cb_topup_bot(cb_top)
+    topup_entries = [s for s in sent if s[0] == "answer"][-1:]
+    t_text, t_has_kb, t_parse = topup_entries[0][1], topup_entries[0][2], topup_entries[0][3]
+    check("topup text", "ЗАКИДЫВАЕМ РОБУКСЫ ПРЯМО В АКК" in t_text and "Жми и заряжай баланс" in t_text)
+    check("topup privacy link", f'<a href="{h.PRIVACY_URL}">Конфиденциальность и безопасность</a>' in t_text)
+    check("topup html parse mode", t_parse == "HTML")
+    check("topup has bottom button", t_has_kb is True)
+    top_kb = h.topup_keyboard().inline_keyboard
+    check("topup button is url", len(top_kb) == 1 and top_kb[0][0].url == h.PRIVACY_URL)
 
     # 3. Пользователь шлёт фото: инструкция удаляется, есть «Проверка чека», есть вердикт
     sent.clear()

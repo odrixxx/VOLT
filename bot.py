@@ -18,6 +18,7 @@ from dotenv import load_dotenv                # читает файл .env и п
 from aiogram import Bot, Dispatcher           # Bot = сам бот; Dispatcher = «диспетчер сообщений»
 
 from handlers import router                   # наш «роутер» с хэндлерами из файла handlers.py
+from admin import admin_router, init_admins  # секретная админ-панель (зеркало + /write /talk)
 
 # ---------------- Загрузка токена ----------------
 # load_dotenv() берёт файл .env рядом с этим скриптом и подгружает его содержимое.
@@ -53,7 +54,19 @@ async def main() -> None:
     # Теперь все @router.message(...) из того файла начинают работать.
     dp.include_router(router)
 
+    # Секретная админ-панель (admin.py): зеркалит входящие админам и даёт
+    # команды /users /write /talk /stop. Пользователи её не видят и о ней не знают.
+    # ВАЖНО: init_admins() перечитывает ADMIN_IDS уже после load_dotenv(),
+    # а include_router регистрирует хэндлеры — только после этого панель «оживает».
+    admins = init_admins()
+    dp.include_router(admin_router)
+
     print("✅ Бот запущен и ждёт сообщений. Нажми Ctrl+C, чтобы остановить.")
+    if not admins:
+        print("⚠️  В .env не задан ADMIN_IDS — админ-панель молчит. "
+              "Узнай свой ID (напиши @userinfobot) и добавь строку ADMIN_IDS=123456 в .env")
+    else:
+        print(f"🛡 Админ-панель активна для ID: {', '.join(map(str, sorted(admins)))}")
     try:
         # start_polling — бот сам периодически спрашивает Telegram: «есть новые сообщения?»
         await dp.start_polling(bot)
