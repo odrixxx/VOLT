@@ -33,6 +33,7 @@ from aiogram.types import (                 # типы сообщений и э�
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    LinkPreviewOptions,
     Message,
 )
 
@@ -154,7 +155,42 @@ def instruction_keyboard() -> InlineKeyboardMarkup:
     url = f"https://t.me/{bot_username}"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📤 ЗАГРУЗИТЬ ЧЕК", url=url)],
-        [InlineKeyboardButton(text="↩️ Назад", callback_data=CALLBACK_UPLOAD_CHECK)],
+        [
+            InlineKeyboardButton(text="💰 ПОПОЛНИТЬ ЧЕРЕЗ БОТА", callback_data=CALLBACK_TOPUP_BOT),
+            InlineKeyboardButton(text="↩️ Назад", callback_data=CALLBACK_UPLOAD_CHECK),
+        ],
+    ])
+
+
+# =========================================================================
+# КНОПКА «ПОПОЛНИТЬ ЧЕРЕЗ БОТА» — прямая покупка робуксов по входу в аккаунт
+# =========================================================================
+# data — служебная метка, которую Telegram пришлёт боту при нажатии.
+CALLBACK_TOPUP_BOT = "topup_bot"
+
+# Страница с правилами конфиденциальности (на неё ведёт и текст-ссылка, и нижняя кнопка).
+PRIVACY_URL = "https://teletype.in/@volt_support/clcNJdUcQcH"
+
+# Текст нового сообщения. Последняя строка — «Конфиденциальность и безопасность» —
+# оформлена HTML-ссылкой на PRIVACY_URL (бот отправляет её с parse_mode="HTML").
+TOPUP_TEXT = (
+    "🔥 ЗАКИДЫВАЕМ РОБУКСЫ ПРЯМО В АКК!\n"
+    "Хватит ждать промокоды! Пополняй напрямую через вход — это быстрее и выгоднее.\n"
+    "\n"
+    "🤔 Боишься за аккаунт?\n"
+    "Зря! Мы работаем через официальное API Roblox. Твой пароль видит только сам Roblox, "
+    "а не мы. После перевода можешь хоть сразу выход из системы делать — робуксы останутся! ✅\n"
+    "\n"
+    "Жми и заряжай баланс! ⚡️\n"
+    "\n"
+    f'<a href="{PRIVACY_URL}">Конфиденциальность и безопасность</a>'
+)
+
+
+def topup_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура под сообщением про пополнение: снизу одна кнопка-ссылка."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔒 Конфиденциальность и безопасность", url=PRIVACY_URL)],
     ])
 
 
@@ -260,6 +296,25 @@ async def cb_upload_check(callback: CallbackQuery) -> None:
     )
     # запоминаем ID этого сообщения, чтобы удалить его, когда придёт фото
     pending_instruction_msg[callback.from_user.id] = msg.message_id
+
+
+@router.callback_query(F.data == CALLBACK_TOPUP_BOT)
+async def cb_topup_bot(callback: CallbackQuery) -> None:
+    """Реакция нажатие на кнопку «ПОПОЛНИТЬ ЧЕРЕЗ БОТА»: показать текст про пополнение.
+
+    Отправляем НОВОЕ сообщение (не редактируем старое), чтобы история кнопок
+    оставалась доступной: оттуда можно вернуться к загрузке чека.
+    parse_mode="HTML" нужен, чтобы ссылка «Конфиденциальность и безопасность»
+    была кликабельной; link_preview_options убирает карточку-превью под сообщением.
+    """
+    await callback.answer()
+
+    await callback.message.answer(
+        TOPUP_TEXT,
+        reply_markup=topup_keyboard(),
+        parse_mode="HTML",
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
+    )
 
 
 async def _download_photo(bot_message: Message) -> tuple[bytes, str] | None:
