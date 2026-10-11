@@ -1,103 +1,77 @@
 """
-Телеграм-бот: приветствие при первом взаимодействии с пользователем.
+bot.py — ГЛАВНЫЙ файл проекта. Здесь бот создаётся и запускается.
+Сами ответы бота («хэндлеры») лежат в отдельном файле handlers.py.
 
-Запуск:
-    1. pip install -r requirements.txt
-    2. Получи токен у @BotFather в Telegram
-    3. python bot.py            (или задай токен: TELEGRAM_BOT_TOKEN=... python bot.py)
+Запуск (по шагам):
+    1. pip install -r requirements.txt      # установить библиотеки
+    2. Создай файл .env и впиши туда токен от @BotFather (см. README.md)
+    3. python bot.py                        # запустить бота
+
+Остановка: нажми Ctrl+C в терминале.
 """
 
-import asyncio
-import logging
-import os
+import asyncio                                # встроенная библиотека Python для «асинхронных» программ
+import logging                                # чтобы видеть в терминале, что происходит
+import os                                     # чтобы читать переменные окружения (наш токен из .env)
 
-from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
-from aiogram.types import Message
+from dotenv import load_dotenv                # читает файл .env и превращает его в переменные окружения
+from aiogram import Bot, Dispatcher           # Bot = сам бот; Dispatcher = «диспетчер сообщений»
 
-# ---------------- Настройки ----------------
+from handlers import router                   # наш «роутер» с хэндлерами из файла handlers.py
 
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "ВСТАВЬ_СЮДА_ТОКЕН_ОТ_BOTFATHER")
+# ---------------- Загрузка токена ----------------
+# load_dotenv() берёт файл .env рядом с этим скриптом и подгружает его содержимое.
+# После этого os.getenv("TELEGRAM_BOT_TOKEN") вернёт строку с токеном.
+load_dotenv()
 
-# Память о том, кого уже поприветствовали (в памяти бота; сброс при перезапуске)
-welcomed_users: set[int] = set()
-
-router = Router()
-
-# ---------------- Хэндлеры ----------------
-
-
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
-    """Команда /start — всегда показывает приветствие."""
-    welcomed_users.add(message.from_user.id)
-    await message.answer(
-        f"👋 Привет, {message.from_user.first_name}!\n\n"
-        "Это твой новый бот. Я работаю.\n"
-        "Напиши мне чтонибудь, и я отвечу 😉"
-    )
-
-
-@router.message(F.text)
-async def handle_first_message(message: Message) -> None:
-    """Любое текстовое сообщение: если пользователь впервые — приветствуем."""
-    user_id = message.from_user.id
-
-    if user_id not in welcomed_users:
-        welcomed_users.add(user_id)
-        await message.answer(
-            f"👋 Привет, {message.from_user.first_name}! Рад тебя видеть впервые.\n"
-            "Нажми /start, чтобы увидеть полное приветствие, "
-            "или просто напиши мне сообщение."
-        )
-        return
-
-    await message.answer(f"Ты написал: «{message.text}»")
-
-
-# ---------------- Запуск ----------------
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")   # если переменной нет — вернётся пустая строка ""
 
 
 async def main() -> None:
+    """Функция-сборка: создаёт бота, подключает хэндлеры и запускает их."""
+
+    # Логирование — чтобы в терминале было видно служебные сообщения
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    if "ВСТАВЬ_СЮДА" in BOT_TOKEN:
+    # Проверка: если токена нет — объясняем новичку, что сделать, и выходим
+    if not BOT_TOKEN or "ВСТАВЬ" in BOT_TOKEN or "твой_токен" in BOT_TOKEN:
         raise SystemExit(
-            "❌ Не задан токен! Получи токен у @BotFather и вставь его в bot.py "
-            "или задай переменную окружения TELEGRAM_BOT_TOKEN."
+            "❌ Токен не найден!\n"
+            "   1. Напиши @BotFather в Telegram, отправь /newbot и получи токен.\n"
+            "   2. Создай файл .env в папке проекта (можно скопировать .env.example).\n"
+            "   3. Впиши в него строку: TELEGRAM_BOT_TOKEN=твой_токен\n"
+            "   4. Запусти снова: python bot.py"
         )
 
-    bot = Bot(token=BOT_TOKEN)
+    bot = Bot(token=BOT_TOKEN)      # «лицо» бота: умеет читать и писать сообщения в Telegram
+    dp = Dispatcher()               # диспетчер: получает обновления от Telegram и раздаёт их хэндлерам
+
+    # Подключаем наш роутер из handlers.py.
+    # Теперь все @router.message(...) из того файла начинают работать.
+    dp.include_router(router)
+
+    print("✅ Бот запущен и ждёт сообщений. Нажми Ctrl+C, чтобы остановить.")
     try:
-        dp = Dispatcher()
-        dp.include_router(router)
-
-        # Регистрируем меню команд в Telegram (красивая кнопка слева внизу)
-        from aiogram.types import BotCommand
-
-        await bot.set_my_commands([BotCommand(command="start", description="Начать / Приветствие")])
-
-        print("✅ Бот запущен. Нажми Ctrl+C, чтобы остановить.")
+        # start_polling — бот сам периодически спрашивает Telegram: «есть новые сообщения?»
         await dp.start_polling(bot)
     finally:
+        # Всегда закрываем сетевое соединение аккуратно, даже при ошибке
         await bot.session.close()
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        asyncio.run(main())         # точка входа: запускаем нашу асинхронную функцию main()
     except KeyboardInterrupt:
-        print("\n🛑 Бот остановлен.")
-    except SystemExit as e:
-        if e.code:
-            print(e.code)
+        # Пользователь нажал Ctrl+C — это нормальная остановка, не ошибка
+        print("\n🛑 Бот остановлен. Пока!")
     except Exception as e:
-        # Понятная подсказка вместо страшного трейсбека
+        # Понятная подсказка вместо страшного текста ошибки
         if "Unauthorized" in str(e):
-            print("❌ Telegram не принимает токен. Проверь, что токен скопирован полностью "
-                  "и не был отозван (можно создать новый у @BotFather).")
+            print("❌ Telegram не принимает токен. Проверь: токен скопирован целиком? "
+                  "Не был ли он отозван? Можно создать новый у @BotFather (/revoke).")
         else:
             raise
