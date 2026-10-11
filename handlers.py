@@ -114,10 +114,14 @@ def load_welcome_photo() -> BufferedInputFile | None:
 # а дубликаты в множество попасть физически не могут.
 welcomed_users: set[int] = set()
 
-# ---------------- КНОПКА «ЗАГРУЗИТЬ ЧЕК» ----------------
+# ---------------- КНОПКА «ПОГНАЛИ 🔥» (бывш. «ЗАГРУЗИТЬ ЧЕК») ----------------
 # data — это служебная метка, которую Telegram пришлёт боту при нажатии.
 # Её не видит пользователь, видит только надпись text.
 CALLBACK_UPLOAD_CHECK = "upload_check"
+
+# Надпись на главной кнопке. Одно имя на все клавиатуры: если что-то и менять,
+# то только здесь — кнопки в приветствии и в инструкции всегда одинаковые.
+UPLOAD_BTN_TEXT = "ПОГНАЛИ 🔥"
 
 # ID того сообщения с инструкцией, которое надо удалить после того, как
 # пользователь пришлёт фото чека. Храним в памяти словарём: user_id -> message_id.
@@ -129,9 +133,9 @@ pending_instruction_msg: dict[int, int] = {}
 
 def upload_check_keyboard() -> InlineKeyboardMarkup:
     """Клавиатура с одной большой кнопкой под текстом."""
-    kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="📤 ЗАГРУЗИТЬ ЧЕК", callback_data=CALLBACK_UPLOAD_CHECK)
-    ]])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=UPLOAD_BTN_TEXT, callback_data=CALLBACK_UPLOAD_CHECK)]
+    ])
     return kb
 
 
@@ -149,16 +153,18 @@ INSTRUCTION_TEXT = (
 
 
 def instruction_keyboard() -> InlineKeyboardMarkup:
-    """Клавиатура для сообщения-инструкции: кнопка ведёт сразу в диалог с ботом."""
-    # TODO: замени username на реальный юзернейм своего бота (его даёт @BotFather).
-    bot_username = os.getenv("BOT_USERNAME", "your_bot")
-    url = f"https://t.me/{bot_username}"
+    """Клавиатура для сообщения-инструкции: одна кнопка, по нажатию на которую
+    бот просит прислать фото чека.
+
+    Исправление бага «ничего не происходит»: раньше здесь была url-кнопка со ссылкой
+    на t.me/<имя_бота>. Если BOT_USERNAME в .env не задан (или указан неверно), ссылка
+    ведёт в никуда и нажатие выглядит как мёртвое. Теперь это callback-кнопка: при
+    нажатии Telegram шлёт боту сигнал, и тот отвечает текстом-подсказкой прямо в чате.
+    Кнопки «Назад» и «Пополнить через бота» убраны по просьбе — в инструкции они только
+    мешали.
+    """
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📤 ЗАГРУЗИТЬ ЧЕК", url=url)],
-        [
-            InlineKeyboardButton(text="💰 ПОПОЛНИТЬ ЧЕРЕЗ БОТА", callback_data=CALLBACK_TOPUP_BOT),
-            InlineKeyboardButton(text="↩️ Назад", callback_data=CALLBACK_UPLOAD_CHECK),
-        ],
+        [InlineKeyboardButton(text=UPLOAD_BTN_TEXT, callback_data=CALLBACK_UPLOAD_CHECK)],
     ])
 
 
@@ -281,21 +287,47 @@ async def unknown_type(message: Message) -> None:
 
 
 # =========================================================================
-# КНОПКА «ЗАГРУЗИТЬ ЧЕК» + ПРИЁМ И ПРОВЕРКА ЧЕКА
+# КНОПКА «ПОГНАЛИ 🔥» + ПРИЁМ И ПРОВЕРКА ЧЕКА
 # =========================================================================
+
+UPLOAD_REQUEST_TEXT = (
+    "📸 Кидай фото чека прямо сюда в чат!\n"
+    "\n"
+    "Должно быть видно: название «VOLT», дату и сумму.\n"
+    "Как только пришлёшь — проверю за пару секунд и выдам награду 🎁"
+)
+
 
 @router.callback_query(F.data == CALLBACK_UPLOAD_CHECK)
 async def cb_upload_check(callback: CallbackQuery) -> None:
-    """Реакция нажатие на кнопку в приветствии: показать инструкцию."""
-    # answer() обязателен: без него у пользователя сверху крутится часики «загрузка».
-    await callback.answer()
+    """Реакция на нажатие кнопки «ПОГНАЛИ 🔥».
 
-    msg = await callback.message.answer(
-        INSTRUCTION_TEXT,
-        reply_markup=instruction_keyboard(),
-    )
-    # запоминаем ID этого сообщения, чтобы удалить его, когда придёт фото
-    pending_instruction_msg[callback.from_user.id] = msg.message_id
+    Исправление бага «при нажатии ничего не происходит»: раньше кнопка в
+    инструкции была url-кнопкой (ссылка https://t.me/<BOT_USERNAME>). Если
+    BOT_USERNAME в .env не задан, ссылка вела на несуществующего бота
+    «your_bot» — Telegram открывал пустой диалог, и со стороны это выглядело
+    как мёртвая кнопка.
+
+    Теперь это callback-кнопка: по нажатию бот сам показывает инструкцию
+    (первое нажатие), а если инструкция уже на экране — напоминает прислать
+    фото всплывающим уведомлением (повторное нажатие). В обоих случаях
+    пользователь гарантированно получает отклик.
+    """
+    user_id = callback.from_user.id
+
+    # Первый клик: показываем пошаговую инструкцию и запоминаем её сообщение,
+    # чтобы удалить, когда прилетит фото чека.
+    if user_id not in pending_instruction_msg:
+        msg = await callback.message.answer(
+            INSTRUCTION_TEXT,
+            reply_markup=instruction_keyboard(),
+        )
+        pending_instruction_msg[user_id] = msg.message_id
+        await callback.answer()
+        return
+
+    # Инструкция уже висит в чате: нового сообщения не плодим, отвечаем всплывашкой.
+    await callback.answer(UPLOAD_REQUEST_TEXT, show_alert=True)
 
 
 @router.callback_query(F.data == CALLBACK_TOPUP_BOT)
