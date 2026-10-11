@@ -1,2 +1,17 @@
 aiogram>=3.7
 python-dotenv>=1.0
+
+# --- Реальная проверка чеков (receipt_check.py) ---
+# Pillow + numpy нужны для оценки резкости фото и подготовки изображения к OCR.
+Pillow>=10.0
+numpy>=1.24
+
+# Основной OCR-движок: лёгкий, ставится без компиляции, понимает русский и английский.
+rapidocr-onnxruntime>=1.3
+
+# Запасные движки (не обязательны): если rapidocr не поднимется, бот попробует их.
+# pytesseract требует дополнительно системный пакет tesseract-ocr (+ tesseract-ocr-rus).
+# paddleocr самый точный, но тяжёлый (~500 МБ), ставь только если rapidocr не справляется.
+# pytesseract>=0.3.10
+# paddlepaddle>=2.6
+# paddleocr>=2.7
