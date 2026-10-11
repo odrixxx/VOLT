@@ -16,6 +16,7 @@ import os                                     # чтобы читать пере
 
 from dotenv import load_dotenv                # читает файл .env и превращает его в переменные окружения
 from aiogram import Bot, Dispatcher           # Bot = сам бот; Dispatcher = «диспетчер сообщений»
+from aiogram.client.session.aiohttp import AiohttpSession  # сетевая сессия бота (нужна для прокси)
 
 from handlers import router                   # наш «роутер» с хэндлерами из файла handlers.py
 from admin import admin_router, init_admins  # секретная админ-панель (зеркало + /write /talk)
@@ -26,6 +27,11 @@ from admin import admin_router, init_admins  # секретная админ-п�
 load_dotenv()
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")   # если переменной нет — вернётся пустая строка ""
+
+# Необязательный прокси (VPN). Если Telegram API блокируется провайдером,
+# впиши в .env строку: PROXY_URL=socks5://127.0.0.1:1080
+# Порт смотри в настройках своего VPN (SOCKS5/ручной прокси).
+PROXY_URL = os.getenv("PROXY_URL", "").strip()
 
 
 async def main() -> None:
@@ -47,7 +53,39 @@ async def main() -> None:
             "   4. Запусти снова: python bot.py"
         )
 
-    bot = Bot(token=BOT_TOKEN)      # «лицо» бота: умеет читать и писать сообщения в Telegram
+    if PROXY_URL:
+        # Работаем через прокси (VPN) — обычно нужен в РФ, когда провайдер
+        # блокирует api.telegram.org. Требуется библиотека aiohttp-socks.
+        try:
+            from aiohttp_socks import ProxyConnector
+        except ImportError:
+            raise SystemExit(
+                "❌ В .env задан PROXY_URL, но не хватает библиотеки.\n"
+                "   Выполни в терминале:  py -3.12 -m pip install aiohttp-socks\n"
+                "   И запусти бота снова."
+            )
+        print(f"🌐 Бот работает через прокси: {PROXY_URL}")
+        # Собираем SOCKS5-коннектор ВРУЧНУЮ (работает даже с очень новыми
+        # версиями aiohttp, где автоматический proxy= может не подхватиться).
+        from aiohttp_socks import ProxyConnector
+        session = AiohttpSession(proxy=PROXY_URL)
+        # Быстрая проверка связи до запуска polling — чтобы ошибка была понятной
+        import aiohttp
+        try:
+            async with aiohttp.ClientSession(connector=ProxyConnector.from_url(PROXY_URL)) as s:
+                async with s.get("https://api.telegram.org", timeout=aiohttp.ClientTimeout(total=15)) as r:
+                    print(f"🔌 Прокси живой! Telegram API ответил кодом {r.status} (404 — это нормально)")
+        except Exception as pe:
+            raise SystemExit(
+                f"❌ Не удалось достучаться до Telegram через прокси {PROXY_URL}.\n"
+                f"   Причина: {pe}\n"
+                f"   Проверь: 1) VPN-клиент (v2rayN/Xray) запущен и подключён?\n"
+                f"            2) Порт в PROXY_URL совпадает с портом SOCKS в клиенте (у тебя 10808)?\n"
+                f"            3) Тип именно socks5:// (не http://)?"
+            )
+        bot = Bot(token=BOT_TOKEN, session=session)
+    else:
+        bot = Bot(token=BOT_TOKEN)      # «лицо» бота: умеет читать и писать сообщения в Telegram
     dp = Dispatcher()               # диспетчер: получает обновления от Telegram и раздаёт их хэндлерам
 
     # Подключаем наш роутер из handlers.py.
